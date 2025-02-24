@@ -1,4 +1,4 @@
-module github.com/iconitsoftware/go-rabbit
+module github.com/Iconitsoftware/go-rabbit
 
 go 1.22.3
 
