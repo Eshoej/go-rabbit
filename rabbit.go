@@ -413,7 +413,7 @@ func (rabbit *GoRabbit) EnqueueTask(fullTaskName string, context interface{}, op
 		}
 		exchangeName = delayedRes.DelayedExchangeName
 		// (Note: In GoRabbitMQ Go client there is no built–in BCC header; you might simulate this via headers.)
-		pubOpts.Headers = amqp.Table{"BCC": delayedRes.DelayedQueueName}
+		pubOpts.Headers = amqp.Table{"BCC": string(delayedRes.DelayedQueueName)}
 	} else {
 		exchangeName = rabbit.config.Exchanges.TasksTopic
 		if err = ch.ExchangeDeclare(
