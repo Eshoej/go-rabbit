@@ -526,7 +526,7 @@ func (rabbit *GoRabbit) RegisterEventConsumer(eventKey string, consumeFn func(co
 	}
 
 	// Add extra field
-	newOptions["queueName"] = "someQueue"
+	newOptions["queueName"] = eventQueueName
 	go rabbit.handleConsumeMessages(msgs, "event", eventQueueName, consumeFn, options)
 	rabbit.consumers = append(rabbit.consumers, Consumer{
 		Type:        "event",
@@ -601,13 +601,22 @@ func (rabbit *GoRabbit) RegisterTaskConsumer(
 	if err != nil {
 		return "", err
 	}
+
+	newOptions, ok := options.(map[string]interface{})
+	if !ok {
+		fmt.Println("Type assertion failed")
+		return "", errors.New("Type assertion failed")
+	}
+
+	// Add extra field
+	newOptions["queueName"] = taskQueueName
 	go rabbit.handleConsumeMessages(msgs, "task", taskQueueName, consumeFn, options)
 	rabbit.consumers = append(rabbit.consumers, Consumer{
 		Type:        "task",
 		Key:         taskName,
 		ConsumerTag: consumerTag,
 		ConsumeFn:   consumeFn,
-		Options:     options,
+		Options:     newOptions,
 	})
 	return consumerTag, nil
 }
