@@ -4,7 +4,6 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"math"
@@ -519,21 +518,13 @@ func (rabbit *GoRabbit) RegisterEventConsumer(eventKey string, consumeFn func(co
 		return "", err
 	}
 
-	newOptions, ok := options.(map[string]interface{})
-	if !ok {
-		fmt.Println("Type assertion failed")
-		return "", errors.New("Type assertion failed")
-	}
-
-	// Add extra field
-	newOptions["queueName"] = eventQueueName
 	go rabbit.handleConsumeMessages(msgs, "event", eventQueueName, consumeFn, options)
 	rabbit.consumers = append(rabbit.consumers, Consumer{
 		Type:        "event",
 		Key:         eventKey,
 		ConsumerTag: consumerTag,
 		ConsumeFn:   consumeFn,
-		Options:     newOptions,
+		Options:     options,
 	})
 	return consumerTag, nil
 }
@@ -602,21 +593,13 @@ func (rabbit *GoRabbit) RegisterTaskConsumer(
 		return "", err
 	}
 
-	newOptions, ok := options.(map[string]interface{})
-	if !ok {
-		fmt.Println("Type assertion failed")
-		return "", errors.New("Type assertion failed")
-	}
-
-	// Add extra field
-	newOptions["queueName"] = taskQueueName
 	go rabbit.handleConsumeMessages(msgs, "task", taskQueueName, consumeFn, options)
 	rabbit.consumers = append(rabbit.consumers, Consumer{
 		Type:        "task",
 		Key:         taskName,
 		ConsumerTag: consumerTag,
 		ConsumeFn:   consumeFn,
-		Options:     newOptions,
+		Options:     options,
 	})
 	return consumerTag, nil
 }
@@ -811,7 +794,7 @@ func (rabbit *GoRabbit) handleConsumeMessages(msgs <-chan amqp.Delivery, message
 		duration := time.Since(startTime)
 		if err != nil {
 			rabbit.logger.Printf("Error consuming %s %s: %v", messageType, name, err)
-			rabbit.handleConsumeRejection(msg, messageType, msgObj, err, options)
+			rabbit.handleConsumeRejection(msg, messageType, msgObj, err, queueName, options)
 		} else {
 			rabbit.logger.Printf("%s %s consumed in %v", messageType, name, duration)
 		}
@@ -825,7 +808,7 @@ func (rabbit *GoRabbit) handleConsumeMessages(msgs <-chan amqp.Delivery, message
 
 // handleConsumeRejection processes a message that failed to be consumed.
 func (rabbit *GoRabbit) handleConsumeRejection(msg amqp.Delivery, messageType string,
-	msgObj map[string]interface{}, consumeError error, options interface{}) {
+	msgObj map[string]interface{}, consumeError error, queueName string, options interface{}) {
 	// Decide whether to retry.
 	currentAttempt := 0
 	if a, ok := msgObj["attempts"].(float64); ok {
@@ -865,13 +848,10 @@ func (rabbit *GoRabbit) handleConsumeRejection(msg amqp.Delivery, messageType st
 		return
 	}
 	pubOpts.Body = payload
-	// Here we assume options (a map) contains a "queueName" field.
-	opts, _ := options.(map[string]interface{})
-	routingKey := opts["queueName"].(string)
-	if err = rabbit.publishMessage(ch, republishExchange, routingKey, pubOpts); err != nil {
+	if err = rabbit.publishMessage(ch, republishExchange, queueName, pubOpts); err != nil {
 		rabbit.logger.Printf("Error republishing message: %v", err)
 	}
-	rabbit.logger.Printf("Scheduled %s %s for %s (retry: %v, delay: %ds)", messageType, msgObj["uuid"], routingKey, shouldRetry, delaySeconds)
+	rabbit.logger.Printf("Scheduled %s %s for %s (retry: %v, delay: %ds)", messageType, msgObj["uuid"], queueName, shouldRetry, delaySeconds)
 }
 
 // handleFailedMessages processes messages from the failed queue.
