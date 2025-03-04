@@ -413,7 +413,7 @@ func (rabbit *GoRabbit) EnqueueTask(fullTaskName string, context interface{}, op
 		}
 		exchangeName = delayedRes.DelayedExchangeName
 		// (Note: In GoRabbitMQ Go client there is no built–in BCC header; you might simulate this via headers.)
-		pubOpts.Headers = amqp.Table{"BCC": string(delayedRes.DelayedQueueName)}
+		pubOpts.Headers = amqp.Table{"BCC": []any{delayedRes.DelayedQueueName}}
 	} else {
 		exchangeName = rabbit.config.Exchanges.TasksTopic
 		if err = ch.ExchangeDeclare(
@@ -830,7 +830,7 @@ func (rabbit *GoRabbit) handleConsumeRejection(msg amqp.Delivery, messageType st
 			return
 		}
 		republishExchange = retryRes.RetryExchangeName
-		pubOpts.Headers = amqp.Table{"BCC": retryRes.RetryQueueName}
+		pubOpts.Headers = amqp.Table{"BCC": []any{retryRes.RetryQueueName}}
 	} else {
 		deadLetterExchange, err := rabbit.assertDeadLetterExchangeAndQueue(ch)
 		if err != nil {
