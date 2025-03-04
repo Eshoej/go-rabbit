@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"math"
@@ -517,13 +518,22 @@ func (rabbit *GoRabbit) RegisterEventConsumer(eventKey string, consumeFn func(co
 	if err != nil {
 		return "", err
 	}
+
+	newOptions, ok := options.(map[string]interface{})
+	if !ok {
+		fmt.Println("Type assertion failed")
+		return "", errors.New("Type assertion failed")
+	}
+
+	// Add extra field
+	newOptions["queueName"] = "someQueue"
 	go rabbit.handleConsumeMessages(msgs, "event", eventQueueName, consumeFn, options)
 	rabbit.consumers = append(rabbit.consumers, Consumer{
 		Type:        "event",
 		Key:         eventKey,
 		ConsumerTag: consumerTag,
 		ConsumeFn:   consumeFn,
-		Options:     options,
+		Options:     newOptions,
 	})
 	return consumerTag, nil
 }
