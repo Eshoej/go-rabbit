@@ -867,7 +867,7 @@ func (rabbit *GoRabbit) handleFailedMessages(msgs <-chan amqp.Delivery, queueNam
 		rabbit.logger.Printf("Failed message ready to be consumed: %v", msgObj)
 		rabbit.activeMessageConsumptions = append(rabbit.activeMessageConsumptions, msgObj)
 		startTime := time.Now()
-		err := consumeFn(queueName, msgObj)
+		err := consumeFn(msg.RoutingKey, msgObj)
 		duration := time.Since(startTime)
 		if err != nil {
 			rabbit.logger.Printf("Error consuming failed message: %v", err)
