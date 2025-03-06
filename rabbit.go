@@ -658,7 +658,7 @@ func (rabbit *GoRabbit) AssertConnection() error {
 }
 
 // EnqueueMessage enqueues a message to a specific queue.
-func (rabbit *GoRabbit) EnqueueMessage(queueName string, messageObject interface{}, options map[string]interface{}) error {
+func (rabbit *GoRabbit) EnqueueMessage(queueName string, messageObject interface{}) error {
 	ch, err := rabbit.channelPool.GetPublisherChannel()
 	if err != nil {
 		return err
