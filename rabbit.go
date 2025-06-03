@@ -183,6 +183,13 @@ func NewGoRabbit(config GoRabbitConfiguration, logger *zerolog.Logger) (*GoRabbi
 	return rabbit, nil
 }
 
+func (rabbit *GoRabbit) CheckConnection() error {
+	if rabbit.conn == nil || rabbit.conn.IsClosed() {
+		return fmt.Errorf("GoRabbitMQ connection is not established")
+	}
+	return nil
+}
+
 // getConnection returns a singleton connection to GoRabbitMQ.
 func (rabbit *GoRabbit) getConnection() (*amqp.Connection, error) {
 	rabbit.connMutex.Lock()
