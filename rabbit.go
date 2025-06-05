@@ -494,13 +494,22 @@ func (rabbit *GoRabbit) RegisterEventConsumer(eventKey string, consumeFn func(co
 	); err != nil {
 		return "", err
 	}
+
+	queueType := "classic"
+	if !uniqueQueue {
+		queueType = "quorum"
+	}
+
+	args := amqp.Table{
+		"x-queue-type": queueType,
+	}
 	queue, err := ch.QueueDeclare(
 		eventQueueName,
 		true,        // durable
 		uniqueQueue, // auto-delete if unique
 		false,       // exclusive
 		false,       // no-wait
-		nil,         // args
+		args,        // args
 	)
 	if err != nil {
 		return "", err
@@ -569,13 +578,22 @@ func (rabbit *GoRabbit) RegisterTaskConsumer(
 	); err != nil {
 		return "", err
 	}
+
+	queueType := "classic"
+	if !uniqueQueue {
+		queueType = "quorum"
+	}
+
+	args := amqp.Table{
+		"x-queue-type": queueType,
+	}
 	queue, err := ch.QueueDeclare(
 		taskQueueName,
 		true,
 		uniqueQueue,
 		false,
 		false,
-		nil,
+		args,
 	)
 	if err != nil {
 		return "", err
@@ -619,13 +637,17 @@ func (rabbit *GoRabbit) RegisterFailedMessageConsumer(consumeFn func(queueName s
 	}
 	queueName := rabbit.config.Queues.Failed
 	rabbit.logger.Printf("Registering failed message consumer on queue %s", queueName)
+
+	args := amqp.Table{
+		"x-queue-type": "quorum",
+	}
 	queue, err := ch.QueueDeclare(
 		queueName,
 		true,
 		false,
 		false,
 		false,
-		nil,
+		args,
 	)
 	if err != nil {
 		return "", err
