@@ -201,7 +201,7 @@ func (rabbit *GoRabbit) getConnection() (*amqp.Connection, error) {
 		return nil, fmt.Errorf("GoRabbitMQ module is shutting down")
 	}
 	url := generateConnectionURL(rabbit.config.Connection)
-	rabbit.logger.Printf("Opening connection to GoRabbitMQ: %s", url)
+	rabbit.logger.Printf("Opening connection to RabbitMQ")
 	conn, err := amqp.Dial(url)
 	if err != nil {
 		rabbit.logger.Printf("Error connecting to GoRabbitMQ: %v", err)
@@ -993,6 +993,7 @@ func (rabbit *GoRabbit) assertDeadLetterExchangeAndQueue(ch *amqp.Channel) (stri
 	if err := ch.ExchangeDeclare(deadLetterExchangeName, "fanout", true, false, false, false, nil); err != nil {
 		return "", err
 	}
+
 	if _, err := ch.QueueDeclare(deadLetterQueueName, true, false, false, false, nil); err != nil {
 		return "", err
 	}
