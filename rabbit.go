@@ -15,7 +15,6 @@ import (
 	"github.com/cenkalti/backoff"
 	"github.com/google/uuid"
 	amqp "github.com/rabbitmq/amqp091-go"
-	"github.com/rs/zerolog"
 )
 
 // Exchanges holds the exchange names.
@@ -60,22 +59,22 @@ type ConnectionConfiguration struct {
 
 // Event represents an event message.
 type Event struct {
-	EventName string      `json:"eventName"`
-	Context   interface{} `json:"context"`
-	UUID      uuid.UUID   `json:"uuid"`
-	Time      int64       `json:"time"`
-	Attempts  int         `json:"attempts"`
+	EventName string    `json:"eventName"`
+	Context   any       `json:"context"`
+	UUID      uuid.UUID `json:"uuid"`
+	Time      int64     `json:"time"`
+	Attempts  int       `json:"attempts"`
 }
 
 // Task represents a task message.
 type Task struct {
-	TaskName    string      `json:"taskName"`
-	Context     interface{} `json:"context"`
-	UUID        uuid.UUID   `json:"uuid"`
-	Time        int64       `json:"time"`
-	Attempts    int         `json:"attempts"`
-	Origin      string      `json:"origin"`
-	DelayMillis int         `json:"delayMillis,omitempty"`
+	TaskName    string    `json:"taskName"`
+	Context     any       `json:"context"`
+	UUID        uuid.UUID `json:"uuid"`
+	Time        int64     `json:"time"`
+	Attempts    int       `json:"attempts"`
+	Origin      string    `json:"origin"`
+	DelayMillis int       `json:"delayMillis,omitempty"`
 }
 
 // -----------------------------------------------------------------------------
@@ -87,16 +86,16 @@ type Consumer struct {
 	Type        string // "event", "task", "failed"
 	Key         string
 	ConsumerTag string
-	ConsumeFn   func(context interface{}, message interface{}) error
-	Options     interface{}
+	ConsumeFn   func(context any, message any) error
+	Options     any
 }
 
 type FailedMessageConsumer struct {
 	Type        string
 	Key         string
 	ConsumerTag string
-	ConsumeFn   func(queueName string, message interface{}) error
-	Options     interface{}
+	ConsumeFn   func(queueName string, message any) error
+	Options     any
 }
 
 type GoRabbitConfiguration struct {
@@ -149,34 +148,34 @@ func DefaultConfiguration() GoRabbitConfiguration {
 
 type GoRabbit struct {
 	config                    GoRabbitConfiguration
-	logger                    zerolog.Logger
+	logger                    Logger
 	conn                      *amqp.Connection
 	connMutex                 sync.Mutex
 	consumers                 []Consumer
 	failedMessageConsumer     []FailedMessageConsumer
-	activeMessageConsumptions []interface{}
+	activeMessageConsumptions []any
 	isShuttingDown            bool
 	channelPool               *ChannelPool
 }
 
 type GoRabbitConstructorOptions struct {
 	Config GoRabbitConfiguration
-	Logger *zerolog.Logger
+	Logger Logger
 }
 
-func NewGoRabbit(config GoRabbitConfiguration, logger *zerolog.Logger) (*GoRabbit, error) {
+func NewGoRabbit(config GoRabbitConfiguration, logger Logger) (*GoRabbit, error) {
 	if config.ServiceName == "" {
 		log.Fatal("ServiceName is required")
 	}
 
 	if logger == nil {
-		newLogger := zerolog.New(os.Stdout).With().Str("service", config.ServiceName).Logger()
-		logger = &newLogger
+		newLogger := nopLogger{}
+		logger = newLogger
 	}
 
 	rabbit := &GoRabbit{
 		config: config,
-		logger: *logger,
+		logger: logger,
 	}
 
 	rabbit.channelPool = NewChannelPool(logger, rabbit.getConnection, rabbit.onChannelOpened, rabbit.onChannelClosed)
@@ -185,7 +184,8 @@ func NewGoRabbit(config GoRabbitConfiguration, logger *zerolog.Logger) (*GoRabbi
 
 func (rabbit *GoRabbit) CheckConnection() error {
 	if rabbit.conn == nil || rabbit.conn.IsClosed() {
-		return fmt.Errorf("GoRabbitMQ connection is not established")
+		// Logger maybe
+		return fmt.Errorf("no active connection to GoRabbitMQ")
 	}
 	return nil
 }
@@ -200,18 +200,19 @@ func (rabbit *GoRabbit) getConnection() (*amqp.Connection, error) {
 	if rabbit.isShuttingDown {
 		return nil, fmt.Errorf("GoRabbitMQ module is shutting down")
 	}
+
 	url := generateConnectionURL(rabbit.config.Connection)
-	rabbit.logger.Printf("Opening connection to RabbitMQ")
+	rabbit.logger.Info("Opening connection to RabbitMQ")
 	conn, err := amqp.Dial(url)
 	if err != nil {
-		rabbit.logger.Printf("Error connecting to GoRabbitMQ: %v", err)
+		rabbit.logger.Error("Error connecting to GoRabbitMQ: %v", NewField("error", err))
 		return nil, err
 	}
 	rabbit.conn = conn
 	// Set up connection error/close handling.
 	go func() {
 		<-conn.NotifyClose(make(chan *amqp.Error))
-		rabbit.logger.Printf("GoRabbitMQ connection closed")
+		rabbit.logger.Info("GoRabbitMQ connection closed")
 		rabbit.connMutex.Lock()
 		rabbit.conn = nil
 		rabbit.connMutex.Unlock()
@@ -222,23 +223,23 @@ func (rabbit *GoRabbit) getConnection() (*amqp.Connection, error) {
 
 // onConnectionOpened is called when a connection is successfully opened.
 func (rabbit *GoRabbit) onConnectionOpened() {
-	rabbit.logger.Printf("GoRabbitMQ connection opened")
+	rabbit.logger.Info("GoRabbitMQ connection opened")
 	if len(rabbit.consumers) > 0 {
-		if err := rabbit.rerabbiteateRegisteredConsumers(); err != nil {
-			rabbit.logger.Printf("Error rerabbiteating consumers: %v", err)
+		if err := rabbit.recreateRegisteredConsumers(); err != nil {
+			rabbit.logger.Error("Error recreating registered consumers: %v", NewField("error", err))
 		}
 	}
 }
 
-// rerabbiteateRegisteredConsumers reattaches consumers after a reconnect.
-func (rabbit *GoRabbit) rerabbiteateRegisteredConsumers() error {
+// recreateRegisteredConsumers reattaches consumers after a reconnect.
+func (rabbit *GoRabbit) recreateRegisteredConsumers() error {
 	consumersCopy := make([]Consumer, len(rabbit.consumers))
 	copy(consumersCopy, rabbit.consumers)
 	failedMessageConsumersCopy := make([]FailedMessageConsumer, len(rabbit.failedMessageConsumer))
 	copy(failedMessageConsumersCopy, rabbit.failedMessageConsumer)
 	rabbit.consumers = nil
 
-	rabbit.logger.Printf("Rerabbiteating %d registered consumers", len(consumersCopy))
+	rabbit.logger.Info(fmt.Sprint("Recreating %d registered consumers", len(consumersCopy)))
 	for _, consumer := range consumersCopy {
 		switch consumer.Type {
 		case "event":
@@ -267,10 +268,10 @@ func (rabbit *GoRabbit) rerabbiteateRegisteredConsumers() error {
 
 // onChannelOpened is a callback when a channel is opened.
 func (rabbit *GoRabbit) onChannelOpened(ch *amqp.Channel, channelType string) error {
-	rabbit.logger.Printf("GoRabbitMQ %s channel opened", channelType)
+	rabbit.logger.Info(fmt.Sprint("GoRabbitMQ %s channel opened", channelType))
 	if channelType == "consumer" {
 		if err := ch.Qos(rabbit.config.Consumer.Prefetch, 0, false); err != nil {
-			rabbit.logger.Printf("Error setting QoS: %v", err)
+			rabbit.logger.Error("Error setting QoS", NewField("error", err))
 		}
 	}
 	return nil
@@ -279,10 +280,10 @@ func (rabbit *GoRabbit) onChannelOpened(ch *amqp.Channel, channelType string) er
 // onChannelClosed is a callback when a channel is closed.
 func (rabbit *GoRabbit) onChannelClosed(channelType string, err error) error {
 	if rabbit.isShuttingDown {
-		rabbit.logger.Printf("GoRabbitMQ %s channel closed", channelType)
+		rabbit.logger.Info(fmt.Sprint("GoRabbitMQ %s channel closed", channelType))
 		return nil
 	}
-	rabbit.logger.Printf("GoRabbitMQ %s channel closed unexpectedly: %v", channelType, err)
+	rabbit.logger.Error(fmt.Sprintf("GoRabbitMQ %s channel closed unexpectedly", channelType), NewField("error", err))
 	if len(rabbit.consumers) == 0 {
 		return nil
 	}
@@ -295,7 +296,7 @@ func (rabbit *GoRabbit) connectWithBackoff() {
 	operation := func() error {
 		_, err := rabbit.getConnection()
 		if err != nil {
-			rabbit.logger.Printf("Error reconnecting: %v", err)
+			rabbit.logger.Error("Error reconnecting", NewField("error", err))
 		}
 		return err
 	}
@@ -303,7 +304,7 @@ func (rabbit *GoRabbit) connectWithBackoff() {
 	b.InitialInterval = 1 * time.Second
 	b.MaxInterval = 600 * time.Second
 	if err := backoff.Retry(operation, b); err != nil {
-		rabbit.logger.Printf("Failed to reconnect: %v", err)
+		rabbit.logger.Error("Failed to reconnect", NewField("error", err))
 	}
 }
 
@@ -323,7 +324,7 @@ func (rabbit *GoRabbit) publishMessage(ch *amqp.Channel, exchange, routingKey st
 		pubOpts,
 	)
 	if err != nil {
-		rabbit.logger.Printf("Error publishing message: %v", err)
+		rabbit.logger.Error("Error publishing message", NewField("error", err))
 	}
 	return err
 }
@@ -338,14 +339,14 @@ type EmitEventOptions struct {
 }
 
 // EmitEvent emits an event onto the events topic exchange.
-func (rabbit *GoRabbit) EmitEvent(eventName string, context interface{}, options EmitEventOptions) (*Event, error) {
+func (rabbit *GoRabbit) EmitEvent(eventName string, context any, options EmitEventOptions) (*Event, error) {
 	serviceName := rabbit.config.ServiceName
 	if options.ServiceName != nil && *options.ServiceName != "" {
 		serviceName = *options.ServiceName
 	}
 
 	fullEventName := serviceName + "." + eventName
-	rabbit.logger.Printf("Emitting event: %s", fullEventName)
+	rabbit.logger.Info(fmt.Sprintf("Emitting event: %s", fullEventName))
 
 	ch, err := rabbit.channelPool.GetPublisherChannel()
 	if err != nil {
@@ -390,12 +391,12 @@ func (rabbit *GoRabbit) EmitEvent(eventName string, context interface{}, options
 	if err = rabbit.publishMessage(ch, exchangeName, fullEventName, amqp.Publishing{Body: payload}); err != nil {
 		return nil, err
 	}
-	rabbit.logger.Printf("Event %s emitted", fullEventName)
+	rabbit.logger.Info(fmt.Sprintf("Event %s emitted", fullEventName))
 	return evt, nil
 }
 
 // EnqueueTask enqueues a task onto the tasks topic exchange.
-func (rabbit *GoRabbit) EnqueueTask(fullTaskName string, context interface{}, options map[string]interface{}) (*Task, error) {
+func (rabbit *GoRabbit) EnqueueTask(fullTaskName string, context any, options map[string]any) (*Task, error) {
 	serviceName := rabbit.config.ServiceName
 	if s, ok := options["serviceName"].(string); ok && s != "" {
 		serviceName = s
@@ -436,7 +437,7 @@ func (rabbit *GoRabbit) EnqueueTask(fullTaskName string, context interface{}, op
 		}
 	}
 
-	rabbit.logger.Printf("Enqueuing task: %s", fullTaskName)
+	rabbit.logger.Info(fmt.Sprintf("Enqueuing task: %s", fullTaskName))
 	task := &Task{
 		TaskName: fullTaskName,
 		Context:  context,
@@ -457,14 +458,14 @@ func (rabbit *GoRabbit) EnqueueTask(fullTaskName string, context interface{}, op
 	if err = rabbit.publishMessage(ch, exchangeName, fullTaskName, pubOpts); err != nil {
 		return nil, err
 	}
-	rabbit.logger.Printf("Task %s enqueued", fullTaskName)
+	rabbit.logger.Info(fmt.Sprintf("Task %s enqueued", fullTaskName))
 	return task, nil
 }
 
 // RegisterEventConsumer registers a consumer for events.
-func (rabbit *GoRabbit) RegisterEventConsumer(eventKey string, consumeFn func(context interface{}, message interface{}) error, options interface{}) (string, error) {
-	// Here we assume options is a map[string]interface{}
-	opts, _ := options.(map[string]interface{})
+func (rabbit *GoRabbit) RegisterEventConsumer(eventKey string, consumeFn func(context any, message any) error, options any) (string, error) {
+	// Here we assume options is a map[string]any
+	opts, _ := options.(map[string]any)
 	serviceName := rabbit.config.ServiceName
 	if s, ok := opts["serviceName"].(string); ok && s != "" {
 		serviceName = s
@@ -476,7 +477,7 @@ func (rabbit *GoRabbit) RegisterEventConsumer(eventKey string, consumeFn func(co
 
 	exchangeName := rabbit.config.Exchanges.EventsTopic
 	eventQueueName := rabbit.getConsumeEventQueueName(eventKey, serviceName, uniqueQueue)
-	rabbit.logger.Printf("Registering event consumer for key %s on queue %s", eventKey, eventQueueName)
+	rabbit.logger.Info(fmt.Sprintf("Registering event consumer for key %s on queue %s", eventKey, eventQueueName))
 
 	ch, err := rabbit.channelPool.GetConsumerChannel()
 	if err != nil {
@@ -548,9 +549,9 @@ func (rabbit *GoRabbit) RegisterEventConsumer(eventKey string, consumeFn func(co
 // RegisterTaskConsumer registers a consumer for tasks.
 func (rabbit *GoRabbit) RegisterTaskConsumer(
 	taskName string,
-	consumeFn func(context interface{}, message interface{}) error,
-	options interface{}) (string, error) {
-	opts, _ := options.(map[string]interface{})
+	consumeFn func(context any, message any) error,
+	options any) (string, error) {
+	opts, _ := options.(map[string]any)
 	serviceName := rabbit.config.ServiceName
 	if s, ok := opts["serviceName"].(string); ok && s != "" {
 		serviceName = s
@@ -630,7 +631,7 @@ func (rabbit *GoRabbit) RegisterTaskConsumer(
 }
 
 // RegisterFailedMessageConsumer registers a consumer for failed messages.
-func (rabbit *GoRabbit) RegisterFailedMessageConsumer(consumeFn func(queueName string, message interface{}) error, options interface{}) (string, error) {
+func (rabbit *GoRabbit) RegisterFailedMessageConsumer(consumeFn func(queueName string, message any) error, options any) (string, error) {
 	ch, err := rabbit.channelPool.GetConsumerChannel()
 	if err != nil {
 		return "", err
@@ -687,7 +688,7 @@ func (rabbit *GoRabbit) AssertConnection() error {
 }
 
 // EnqueueMessage enqueues a message to a specific queue.
-func (rabbit *GoRabbit) EnqueueMessage(queueName string, messageObject interface{}) error {
+func (rabbit *GoRabbit) EnqueueMessage(queueName string, messageObject any) error {
 	ch, err := rabbit.channelPool.GetPublisherChannel()
 	if err != nil {
 		return err
@@ -794,9 +795,9 @@ func (rabbit *GoRabbit) getTaskConsumerQueueName(taskName, serviceName string, u
 
 // handleConsumeMessages processes messages from event or task consumers.
 func (rabbit *GoRabbit) handleConsumeMessages(msgs <-chan amqp.Delivery, messageType, queueName string,
-	consumeFn func(context interface{}, message interface{}) error, options interface{}) {
+	consumeFn func(context any, message any) error, options any) {
 	for msg := range msgs {
-		var msgObj map[string]interface{}
+		var msgObj map[string]any
 
 		if err := json.Unmarshal(msg.Body, &msgObj); err != nil {
 			rabbit.logger.Printf("Error unmarshaling message: %v", err)
@@ -837,7 +838,7 @@ func (rabbit *GoRabbit) handleConsumeMessages(msgs <-chan amqp.Delivery, message
 
 // handleConsumeRejection processes a message that failed to be consumed.
 func (rabbit *GoRabbit) handleConsumeRejection(msg amqp.Delivery, messageType string,
-	msgObj map[string]interface{}, consumeError error, queueName string, options interface{}) {
+	msgObj map[string]any, consumeError error, queueName string, options any) {
 	// Decide whether to retry.
 	currentAttempt := 0
 	if a, ok := msgObj["attempts"].(float64); ok {
@@ -885,9 +886,9 @@ func (rabbit *GoRabbit) handleConsumeRejection(msg amqp.Delivery, messageType st
 
 // handleFailedMessages processes messages from the failed queue.
 func (rabbit *GoRabbit) handleFailedMessages(msgs <-chan amqp.Delivery, queueName string,
-	consumeFn func(queueName string, message interface{}) error, options interface{}) {
+	consumeFn func(queueName string, message any) error, options any) {
 	for msg := range msgs {
-		var msgObj map[string]interface{}
+		var msgObj map[string]any
 		if err := json.Unmarshal(msg.Body, &msgObj); err != nil {
 			rabbit.logger.Printf("Error unmarshaling failed message: %v", err)
 			msg.Nack(false, false)
@@ -1004,11 +1005,11 @@ func (rabbit *GoRabbit) assertDeadLetterExchangeAndQueue(ch *amqp.Channel) (stri
 }
 
 // decideConsumerRetry decides whether a message should be retried.
-func decideConsumerRetry(currentAttempt int, options interface{}) (bool, int) {
+func decideConsumerRetry(currentAttempt int, options any) (bool, int) {
 	// Default: fixed delay of 16 seconds, maximum 12 attempts.
 	maxAttempts := 12
 	delaySeconds := 16
-	if opts, ok := options.(map[string]interface{}); ok {
+	if opts, ok := options.(map[string]any); ok {
 		if m, ok := opts["maxAttempts"].(int); ok {
 			maxAttempts = m
 		}
@@ -1026,8 +1027,8 @@ func decideConsumerRetry(currentAttempt int, options interface{}) (bool, int) {
 }
 
 // removeFromSlice is a helper to remove an item from a slice.
-func removeFromSlice(slice []interface{}, item interface{}) []interface{} {
-	newSlice := []interface{}{}
+func removeFromSlice(slice []any, item any) []any {
+	newSlice := []any{}
 	for _, v := range slice {
 		if !reflect.DeepEqual(v, item) {
 			newSlice = append(newSlice, v)

@@ -2,12 +2,11 @@ package gorabbit
 
 import (
 	amqp "github.com/rabbitmq/amqp091-go"
-	"github.com/rs/zerolog"
 	"sync"
 )
 
 type ChannelPool struct {
-	logger            *zerolog.Logger
+	logger            Logger
 	getConnectionFunc func() (*amqp.Connection, error)
 	onChannelOpened   func(ch *amqp.Channel, channelType string) error
 	onChannelClosed   func(channelType string, err error) error
@@ -17,7 +16,7 @@ type ChannelPool struct {
 }
 
 // NewChannelPool rabbiteates a new ChannelPool.
-func NewChannelPool(logger *zerolog.Logger,
+func NewChannelPool(logger Logger,
 	getConn func() (*amqp.Connection, error),
 	onOpen func(ch *amqp.Channel, channelType string) error,
 	onClose func(channelType string, err error) error) *ChannelPool {
