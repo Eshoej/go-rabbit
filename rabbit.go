@@ -807,7 +807,9 @@ func (rabbit *GoRabbit) handleConsumeMessages(msgs <-chan amqp.Delivery, message
 
 		if err := json.Unmarshal(msg.Body, &msgObj); err != nil {
 			rabbit.logger.Error(fmt.Sprintf("Error unmarshaling message: %v", err))
-			msg.Nack(false, false)
+			if nackErr := msg.Nack(false, false); nackErr != nil {
+				rabbit.logger.Error(fmt.Sprintf("Error NACKing message: %v", nackErr))
+			}
 			continue
 		}
 
@@ -897,7 +899,9 @@ func (rabbit *GoRabbit) handleFailedMessages(msgs <-chan amqp.Delivery, queueNam
 		var msgObj map[string]any
 		if err := json.Unmarshal(msg.Body, &msgObj); err != nil {
 			rabbit.logger.Error(fmt.Sprintf("Error unmarshaling failed message: %v", err))
-			msg.Nack(false, false)
+			if nackErr := msg.Nack(false, false); nackErr != nil {
+				rabbit.logger.Error(fmt.Sprintf("Error NACKing message: %v", nackErr))
+			}
 			continue
 		}
 		rabbit.logger.Info(fmt.Sprintf("Failed message ready to be consumed: %v", msgObj))
@@ -907,7 +911,9 @@ func (rabbit *GoRabbit) handleFailedMessages(msgs <-chan amqp.Delivery, queueNam
 		duration := time.Since(startTime)
 		if err != nil {
 			rabbit.logger.Error(fmt.Sprintf("Error consuming failed message: %v", err))
-			msg.Nack(false, true)
+			if nackErr := msg.Nack(false, true); nackErr != nil {
+				rabbit.logger.Error(fmt.Sprintf("Error NACKing failed message: %v", nackErr))
+			}
 		} else {
 			if err = msg.Ack(false); err != nil {
 				rabbit.logger.Error(fmt.Sprintf("Error ACKing failed message: %v", err))

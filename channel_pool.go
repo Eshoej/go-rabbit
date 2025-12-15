@@ -1,8 +1,9 @@
 package gorabbit
 
 import (
-	amqp "github.com/rabbitmq/amqp091-go"
 	"sync"
+
+	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 type ChannelPool struct {
@@ -44,10 +45,10 @@ func (cp *ChannelPool) GetPublisherChannel() (*amqp.Channel, error) {
 		return nil, err
 	}
 	cp.publisherChannel = ch
-	cp.onChannelOpened(ch, "publisher")
+	_ = cp.onChannelOpened(ch, "publisher")
 	go func() {
 		err := <-ch.NotifyClose(make(chan *amqp.Error))
-		cp.onChannelClosed("publisher", err)
+		_ = cp.onChannelClosed("publisher", err)
 		cp.mu.Lock()
 		cp.publisherChannel = nil
 		cp.mu.Unlock()
@@ -71,10 +72,10 @@ func (cp *ChannelPool) GetConsumerChannel() (*amqp.Channel, error) {
 		return nil, err
 	}
 	cp.consumerChannel = ch
-	cp.onChannelOpened(ch, "consumer")
+	_ = cp.onChannelOpened(ch, "consumer")
 	go func() {
 		err := <-ch.NotifyClose(make(chan *amqp.Error))
-		cp.onChannelClosed("consumer", err)
+		_ = cp.onChannelClosed("consumer", err)
 		cp.mu.Lock()
 		cp.consumerChannel = nil
 		cp.mu.Unlock()
@@ -87,11 +88,11 @@ func (cp *ChannelPool) Close() {
 	cp.mu.Lock()
 	defer cp.mu.Unlock()
 	if cp.publisherChannel != nil {
-		cp.publisherChannel.Close()
+		_ = cp.publisherChannel.Close()
 		cp.publisherChannel = nil
 	}
 	if cp.consumerChannel != nil {
-		cp.consumerChannel.Close()
+		_ = cp.consumerChannel.Close()
 		cp.consumerChannel = nil
 	}
 }
