@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log"
 	"math"
-	"os"
 	"reflect"
 	"sync"
 	"time"
@@ -562,7 +561,7 @@ func (rabbit *GoRabbit) RegisterTaskConsumer(
 	}
 	fullTaskName := serviceName + "." + taskName
 	taskQueueName := rabbit.getTaskConsumerQueueName(taskName, serviceName, uniqueQueue)
-	rabbit.logger.Printf("Registering task consumer for %s on queue %s", taskName, taskQueueName)
+	rabbit.logger.Info(fmt.Sprintf("Registering task consumer for %s on queue %s", taskName, taskQueueName))
 
 	ch, err := rabbit.channelPool.GetConsumerChannel()
 	if err != nil {
@@ -637,7 +636,7 @@ func (rabbit *GoRabbit) RegisterFailedMessageConsumer(consumeFn func(queueName s
 		return "", err
 	}
 	queueName := rabbit.config.Queues.Failed
-	rabbit.logger.Printf("Registering failed message consumer on queue %s", queueName)
+	rabbit.logger.Info(fmt.Sprintf("Registering failed message consumer on queue %s", queueName))
 
 	args := amqp.Table{
 		"x-queue-type": "quorum",
@@ -701,7 +700,7 @@ func (rabbit *GoRabbit) EnqueueMessage(queueName string, messageObject any) erro
 	if err = rabbit.publishMessage(ch, "", queueName, amqp.Publishing{Body: payload}); err != nil {
 		return err
 	}
-	rabbit.logger.Printf("Enqueued message to queue %s", queueName)
+	rabbit.logger.Info(fmt.Sprintf("Enqueued message to queue %s", queueName))
 	return nil
 }
 
@@ -712,9 +711,9 @@ func (rabbit *GoRabbit) Shutdown(timeout time.Duration) error {
 	}
 	rabbit.isShuttingDown = true
 
-	rabbit.logger.Printf("Shutting down GoRabbitMQ")
+	rabbit.logger.Info("Shutting down GoRabbitMQ")
 	if err := rabbit.cancelAllConsumers(); err != nil {
-		rabbit.logger.Printf("Error cancelling consumers: %v", err)
+		rabbit.logger.Error(fmt.Sprintf("Error cancelling consumers: %v", err))
 	}
 
 	done := make(chan struct{})
@@ -730,7 +729,7 @@ func (rabbit *GoRabbit) Shutdown(timeout time.Duration) error {
 	select {
 	case <-done:
 	case <-time.After(timeout):
-		rabbit.logger.Printf("Timeout waiting for consumers to finish")
+		rabbit.logger.Error("Timeout waiting for consumers to finish")
 	}
 
 	// (Optionally: nack any remaining messages)
@@ -738,7 +737,7 @@ func (rabbit *GoRabbit) Shutdown(timeout time.Duration) error {
 	rabbit.channelPool.Close()
 	if rabbit.conn != nil {
 		if err := rabbit.conn.Close(); err != nil {
-			rabbit.logger.Printf("Error closing connection: %v", err)
+			rabbit.logger.Error(fmt.Sprintf("Error closing connection: %v", err))
 		}
 		rabbit.conn = nil
 	}
@@ -753,7 +752,7 @@ func (rabbit *GoRabbit) cancelAllConsumers() error {
 	}
 	for _, consumer := range rabbit.consumers {
 		if err := ch.Cancel(consumer.ConsumerTag, false); err != nil {
-			rabbit.logger.Printf("Error cancelling consumer %s: %v", consumer.ConsumerTag, err)
+			rabbit.logger.Error(fmt.Sprintf("Error cancelling consumer %s: %v", consumer.ConsumerTag, err))
 		}
 	}
 	rabbit.consumers = nil
@@ -800,7 +799,7 @@ func (rabbit *GoRabbit) handleConsumeMessages(msgs <-chan amqp.Delivery, message
 		var msgObj map[string]any
 
 		if err := json.Unmarshal(msg.Body, &msgObj); err != nil {
-			rabbit.logger.Printf("Error unmarshaling message: %v", err)
+			rabbit.logger.Error(fmt.Sprintf("Error unmarshaling message: %v", err))
 			msg.Nack(false, false)
 			continue
 		}
@@ -816,22 +815,22 @@ func (rabbit *GoRabbit) handleConsumeMessages(msgs <-chan amqp.Delivery, message
 				name = v
 			}
 		}
-		rabbit.logger.Printf("%s %s ready to be consumed", messageType, name)
+		rabbit.logger.Info(fmt.Sprintf("%s %s ready to be consumed", messageType, name))
 		rabbit.activeMessageConsumptions = append(rabbit.activeMessageConsumptions, msgObj)
 
 		startTime := time.Now()
 		err := consumeFn(msgObj["context"], msgObj)
 		duration := time.Since(startTime)
 		if err != nil {
-			rabbit.logger.Printf("Error consuming %s %s: %v", messageType, name, err)
+			rabbit.logger.Error(fmt.Sprintf("Error consuming %s %s: %v", messageType, name, err))
 			rabbit.handleConsumeRejection(msg, messageType, msgObj, err, queueName, options)
 		} else {
-			rabbit.logger.Printf("%s %s consumed in %v", messageType, name, duration)
+			rabbit.logger.Info(fmt.Sprintf("%s %s consumed in %v", messageType, name, duration))
 		}
 
 		rabbit.activeMessageConsumptions = removeFromSlice(rabbit.activeMessageConsumptions, msgObj)
 		if err := msg.Ack(false); err != nil {
-			rabbit.logger.Printf("Error ACKing message: %v", err)
+			rabbit.logger.Error(fmt.Sprintf("Error ACKing message: %v", err))
 		}
 	}
 }
@@ -848,7 +847,7 @@ func (rabbit *GoRabbit) handleConsumeRejection(msg amqp.Delivery, messageType st
 	// (Optionally, call an onError handler here.)
 	ch, err := rabbit.channelPool.GetPublisherChannel()
 	if err != nil {
-		rabbit.logger.Printf("Error getting publisher channel: %v", err)
+		rabbit.logger.Error(fmt.Sprintf("Error getting publisher channel: %v", err))
 		return
 	}
 	var republishExchange string
@@ -856,7 +855,7 @@ func (rabbit *GoRabbit) handleConsumeRejection(msg amqp.Delivery, messageType st
 	if shouldRetry {
 		retryRes, err := rabbit.assertRetryExchangeAndQueue(ch, delaySeconds)
 		if err != nil {
-			rabbit.logger.Printf("Error asserting retry exchange: %v", err)
+			rabbit.logger.Error(fmt.Sprintf("Error asserting retry exchange: %v", err))
 			return
 		}
 		republishExchange = retryRes.RetryExchangeName
@@ -864,7 +863,7 @@ func (rabbit *GoRabbit) handleConsumeRejection(msg amqp.Delivery, messageType st
 	} else {
 		deadLetterExchange, err := rabbit.assertDeadLetterExchangeAndQueue(ch)
 		if err != nil {
-			rabbit.logger.Printf("Error asserting dead letter exchange: %v", err)
+			rabbit.logger.Error(fmt.Sprintf("Error asserting dead letter exchange: %v", err))
 			return
 		}
 		republishExchange = deadLetterExchange
@@ -874,14 +873,14 @@ func (rabbit *GoRabbit) handleConsumeRejection(msg amqp.Delivery, messageType st
 	msgObj["attempts"] = currentAttempt + 1
 	payload, err := json.Marshal(msgObj)
 	if err != nil {
-		rabbit.logger.Printf("Error marshaling message: %v", err)
+		rabbit.logger.Error(fmt.Sprintf("Error marshaling message: %v", err))
 		return
 	}
 	pubOpts.Body = payload
 	if err = rabbit.publishMessage(ch, republishExchange, queueName, pubOpts); err != nil {
-		rabbit.logger.Printf("Error republishing message: %v", err)
+		rabbit.logger.Error(fmt.Sprintf("Error republishing message: %v", err))
 	}
-	rabbit.logger.Printf("Scheduled %s %s for %s (retry: %v, delay: %ds)", messageType, msgObj["uuid"], queueName, shouldRetry, delaySeconds)
+	rabbit.logger.Info(fmt.Sprintf("Scheduled %s %s for %s (retry: %v, delay: %ds)", messageType, msgObj["uuid"], queueName, shouldRetry, delaySeconds))
 }
 
 // handleFailedMessages processes messages from the failed queue.
@@ -890,23 +889,23 @@ func (rabbit *GoRabbit) handleFailedMessages(msgs <-chan amqp.Delivery, queueNam
 	for msg := range msgs {
 		var msgObj map[string]any
 		if err := json.Unmarshal(msg.Body, &msgObj); err != nil {
-			rabbit.logger.Printf("Error unmarshaling failed message: %v", err)
+			rabbit.logger.Error(fmt.Sprintf("Error unmarshaling failed message: %v", err))
 			msg.Nack(false, false)
 			continue
 		}
-		rabbit.logger.Printf("Failed message ready to be consumed: %v", msgObj)
+		rabbit.logger.Info(fmt.Sprintf("Failed message ready to be consumed: %v", msgObj))
 		rabbit.activeMessageConsumptions = append(rabbit.activeMessageConsumptions, msgObj)
 		startTime := time.Now()
 		err := consumeFn(msg.RoutingKey, msgObj)
 		duration := time.Since(startTime)
 		if err != nil {
-			rabbit.logger.Printf("Error consuming failed message: %v", err)
+			rabbit.logger.Error(fmt.Sprintf("Error consuming failed message: %v", err))
 			msg.Nack(false, true)
 		} else {
 			if err = msg.Ack(false); err != nil {
-				rabbit.logger.Printf("Error ACKing failed message: %v", err)
+				rabbit.logger.Error(fmt.Sprintf("Error ACKing failed message: %v", err))
 			}
-			rabbit.logger.Printf("Failed message consumed in %v", duration)
+			rabbit.logger.Info(fmt.Sprintf("Failed message consumed in %v", duration))
 		}
 		rabbit.activeMessageConsumptions = removeFromSlice(rabbit.activeMessageConsumptions, msgObj)
 	}
