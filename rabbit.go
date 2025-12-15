@@ -421,9 +421,9 @@ func (rabbit *GoRabbit) EnqueueTask(fullTaskName string, context any, options ma
 	pubOpts := amqp.Publishing{}
 	if delayMillis > 0 {
 		// Create a delayed exchange and queue.
-		delayedRes, err := rabbit.assertDelayedTaskExchangeAndQueue(ch, delayMillis)
-		if err != nil {
-			return nil, err
+		delayedRes, errDelayed := rabbit.assertDelayedTaskExchangeAndQueue(ch, delayMillis)
+		if errDelayed != nil {
+			return nil, errDelayed
 		}
 		exchangeName = delayedRes.DelayedExchangeName
 		// (Note: In GoRabbitMQ Go client there is no built–in BCC header; you might simulate this via headers.)
@@ -862,17 +862,17 @@ func (rabbit *GoRabbit) handleConsumeRejection(msg amqp.Delivery, messageType st
 	var republishExchange string
 	pubOpts := amqp.Publishing{}
 	if shouldRetry {
-		retryRes, err := rabbit.assertRetryExchangeAndQueue(ch, delaySeconds)
-		if err != nil {
-			rabbit.logger.Error(fmt.Sprintf("Error asserting retry exchange: %v", err))
+		retryRes, errRetry := rabbit.assertRetryExchangeAndQueue(ch, delaySeconds)
+		if errRetry != nil {
+			rabbit.logger.Error(fmt.Sprintf("Error asserting retry exchange: %v", errRetry))
 			return
 		}
 		republishExchange = retryRes.RetryExchangeName
 		pubOpts.Headers = amqp.Table{"BCC": []any{retryRes.RetryQueueName}}
 	} else {
-		deadLetterExchange, err := rabbit.assertDeadLetterExchangeAndQueue(ch)
-		if err != nil {
-			rabbit.logger.Error(fmt.Sprintf("Error asserting dead letter exchange: %v", err))
+		deadLetterExchange, errDlx := rabbit.assertDeadLetterExchangeAndQueue(ch)
+		if errDlx != nil {
+			rabbit.logger.Error(fmt.Sprintf("Error asserting dead letter exchange: %v", errDlx))
 			return
 		}
 		republishExchange = deadLetterExchange
