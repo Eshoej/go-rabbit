@@ -13,7 +13,7 @@ We aim to maintain a similar API and feature set where appropriate for Go.
 ## Installation
 
 ```bash
-go get github.com/Iconitsoftware/go-rabbit
+go get github.com/Eshoej/go-rabbit
 ```
 
 ## Usage
@@ -25,7 +25,7 @@ package main
 
 import (
 	"log"
-	gorabbit "github.com/Iconitsoftware/go-rabbit"
+	gorabbit "github.com/Eshoej/go-rabbit"
 )
 
 func main() {

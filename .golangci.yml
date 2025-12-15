@@ -23,7 +23,7 @@ linters-settings:
   gofmt:
     simplify: true
   goimports:
-    local-prefixes: github.com/Iconitsoftware/go-rabbit
+    local-prefixes: github.com/Eshoej/go-rabbit
 
 issues:
   exclude-use-default: false
