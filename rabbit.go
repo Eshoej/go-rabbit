@@ -89,6 +89,7 @@ type Consumer struct {
 	Options     any
 }
 
+// FailedMessageConsumer holds information about a registered failed message consumer.
 type FailedMessageConsumer struct {
 	Type        string
 	Key         string
@@ -97,6 +98,7 @@ type FailedMessageConsumer struct {
 	Options     any
 }
 
+// GoRabbitConfiguration holds the complete configuration for the GoRabbit client.
 type GoRabbitConfiguration struct {
 	ServiceName         string
 	DefaultLogLevel     string
@@ -111,6 +113,7 @@ type GoRabbitConfiguration struct {
 	Connection ConnectionConfiguration
 }
 
+// DefaultConfiguration returns a configuration with sensible default values.
 func DefaultConfiguration() GoRabbitConfiguration {
 	return GoRabbitConfiguration{
 		ServiceName:         "defaultService",
@@ -145,6 +148,7 @@ func DefaultConfiguration() GoRabbitConfiguration {
 	}
 }
 
+// GoRabbit is the main client struct for interacting with RabbitMQ.
 type GoRabbit struct {
 	config                    GoRabbitConfiguration
 	logger                    Logger
@@ -157,11 +161,13 @@ type GoRabbit struct {
 	channelPool               *ChannelPool
 }
 
+// GoRabbitConstructorOptions holds options for the constructor (unused in current factory, kept for future).
 type GoRabbitConstructorOptions struct {
 	Config GoRabbitConfiguration
 	Logger Logger
 }
 
+// NewGoRabbit creates a new instance of the GoRabbit client.
 func NewGoRabbit(config GoRabbitConfiguration, logger Logger) (*GoRabbit, error) {
 	if config.ServiceName == "" {
 		log.Fatal("ServiceName is required")
@@ -181,6 +187,7 @@ func NewGoRabbit(config GoRabbitConfiguration, logger Logger) (*GoRabbit, error)
 	return rabbit, nil
 }
 
+// CheckConnection checks if the connection to RabbitMQ is active.
 func (rabbit *GoRabbit) CheckConnection() error {
 	if rabbit.conn == nil || rabbit.conn.IsClosed() {
 		// Logger maybe
@@ -238,7 +245,7 @@ func (rabbit *GoRabbit) recreateRegisteredConsumers() error {
 	copy(failedMessageConsumersCopy, rabbit.failedMessageConsumer)
 	rabbit.consumers = nil
 
-	rabbit.logger.Info(fmt.Sprint("Recreating %d registered consumers", len(consumersCopy)))
+	rabbit.logger.Info(fmt.Sprintf("Recreating %d registered consumers", len(consumersCopy)))
 	for _, consumer := range consumersCopy {
 		switch consumer.Type {
 		case "event":
@@ -267,7 +274,7 @@ func (rabbit *GoRabbit) recreateRegisteredConsumers() error {
 
 // onChannelOpened is a callback when a channel is opened.
 func (rabbit *GoRabbit) onChannelOpened(ch *amqp.Channel, channelType string) error {
-	rabbit.logger.Info(fmt.Sprint("GoRabbitMQ %s channel opened", channelType))
+	rabbit.logger.Info(fmt.Sprintf("GoRabbitMQ %s channel opened", channelType))
 	if channelType == "consumer" {
 		if err := ch.Qos(rabbit.config.Consumer.Prefetch, 0, false); err != nil {
 			rabbit.logger.Error("Error setting QoS", NewField("error", err))
@@ -279,7 +286,7 @@ func (rabbit *GoRabbit) onChannelOpened(ch *amqp.Channel, channelType string) er
 // onChannelClosed is a callback when a channel is closed.
 func (rabbit *GoRabbit) onChannelClosed(channelType string, err error) error {
 	if rabbit.isShuttingDown {
-		rabbit.logger.Info(fmt.Sprint("GoRabbitMQ %s channel closed", channelType))
+		rabbit.logger.Info(fmt.Sprintf("GoRabbitMQ %s channel closed", channelType))
 		return nil
 	}
 	rabbit.logger.Error(fmt.Sprintf("GoRabbitMQ %s channel closed unexpectedly", channelType), NewField("error", err))
